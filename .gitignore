@@ -208,3 +208,7 @@ cache
 
 # Kiro
 /.kiro
+
+# Experimentation
+
+/results
