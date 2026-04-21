@@ -21,29 +21,36 @@ logger = logging.getLogger(__name__)
 
 
 def _unwrap_nested(data: dict, required_keys: List[str]) -> dict:
-    """Unwrap a potentially nested LLM response to find the expected keys.
-
-    Some LLMs wrap the response in an extra layer like
-    ``{"developer": {"user_name": ...}}``. This function checks if the
-    required keys are present at the top level; if not, it looks one
-    level deeper for a dict value that contains them.
-
-    Args:
-        data: Parsed JSON dict from the LLM.
-        required_keys: Keys that must be present in the result.
-
-    Returns:
-        A dict containing the required keys (may be the original or
-        an inner dict).
-    """
+    """Unwrap a potentially nested LLM response to find the expected keys."""
     if all(k in data for k in required_keys):
         return data
-    # Try one level deeper
     for value in data.values():
         if isinstance(value, dict) and all(k in value for k in required_keys):
             return value
-    # Give up — return original and let Pydantic raise a clear error
     return data
+
+
+def _validate_vague_query(
+    query: str,
+    profile: SyntheticProfile,
+    task_context: SyntheticTaskContext,
+) -> bool:
+    """Return True if the query does not contain forbidden profile/task literals.
+
+    Args:
+        query: The generated follow-up query.
+        profile: The synthetic profile for this trial.
+        task_context: The synthetic task context for this trial.
+
+    Returns:
+        True if the query is acceptably vague (no forbidden terms found).
+    """
+    query_lower = query.lower()
+    forbidden = [
+        profile.preferred_language.lower(),
+        task_context.current_project.lower(),
+    ] + [t.lower() for t in profile.preferred_tools]
+    return not any(term in query_lower for term in forbidden if term)
 
 
 class SyntheticDataGenerator:
@@ -228,20 +235,30 @@ class SyntheticDataGenerator:
     # Follow-up query generation
     # ------------------------------------------------------------------
 
-    def generate_follow_up_query(
+    def generate_vague_query(
         self,
         profile: SyntheticProfile,
         task_context: SyntheticTaskContext,
     ) -> str:
-        """Generate a natural follow-up query that benefits from personalisation.
+        """Generate an intentionally vague follow-up query.
+
+        The query asks for a recommendation, prioritization, or next action
+        without restating profile or task facts. It only becomes answerable
+        when the assistant has access to both memory sources.
 
         Args:
             profile: The synthetic profile for this trial.
             task_context: The synthetic task context for this trial.
 
         Returns:
-            A plain-text query string.
+            A plain-text vague query string.
         """
+        forbidden_terms = [
+            profile.preferred_language,
+            task_context.current_project,
+        ] + list(profile.preferred_tools)
+        forbidden_str = ", ".join(f'"{t}"' for t in forbidden_terms if t)
+
         messages = [
             {
                 "role": "system",
@@ -254,13 +271,25 @@ class SyntheticDataGenerator:
             {
                 "role": "user",
                 "content": (
-                    f"Generate a natural question that {profile.user_name} "
-                    f"would ask about their project "
-                    f"'{task_context.current_project}' that would benefit "
-                    f"from knowing their tool preferences "
-                    f"({', '.join(profile.preferred_tools)}) and current "
-                    f"goals ({', '.join(task_context.goals)}). "
-                    f'Return JSON: {{"query": "your question here"}}'
+                    "Generate a short, intentionally vague follow-up question "
+                    "that a developer might ask their AI assistant. The question "
+                    "should ask for a recommendation, prioritization, or next "
+                    "action — something like "
+                    '"Which of my pending tasks should I tackle first?" or '
+                    '"What\'s the most impactful thing I could do right now?" or '
+                    '"How should I prioritize what\'s on my plate?"\n\n'
+                    "The developer has several pending tasks/options to choose "
+                    "from. The query should implicitly reference choosing among "
+                    "them or prioritizing, without naming the specific options.\n\n"
+                    "CRITICAL RULES:\n"
+                    "- The query MUST be vague and general on its own.\n"
+                    "- The query MUST NOT mention any specific tools, "
+                    "programming languages, project names, or task details.\n"
+                    "- The query should only become answerable when the "
+                    "assistant has access to the user's profile and task context.\n"
+                    f"- Do NOT include any of these words or phrases in the "
+                    f"query: {forbidden_str}\n\n"
+                    'Return JSON: {"query": "your question here"}'
                 ),
             },
         ]
@@ -281,6 +310,99 @@ class SyntheticDataGenerator:
             },
         }
 
+        max_attempts = 4  # 1 initial + 3 retries
+        last_query = ""
+
+        for attempt in range(max_attempts):
+            llm_response = llm_chat_with_json_output(
+                agent_name=self.agent_name,
+                messages=messages,
+                base_url=self.kernel_url,
+                response_format=response_format,
+            )
+
+            raw = llm_response["response"]["response_message"]
+            data = json.loads(raw) if isinstance(raw, str) else raw
+            data = _unwrap_nested(data, ["query"])
+            last_query = data["query"]
+
+            if _validate_vague_query(last_query, profile, task_context):
+                return last_query
+
+            logger.warning(
+                "Vague query validation failed (attempt %d/%d): %s",
+                attempt + 1,
+                max_attempts,
+                last_query,
+            )
+
+        # Accept best-effort after exhausting retries
+        logger.warning("Accepting query after %d failed validations: %s", max_attempts, last_query)
+        return last_query
+
+    # ------------------------------------------------------------------
+    # Plausible actions generation
+    # ------------------------------------------------------------------
+
+    def generate_plausible_actions(
+        self, profile: SyntheticProfile, task_context: SyntheticTaskContext
+    ) -> List[str]:
+        """Generate 3-4 plausible next actions given a profile and task context.
+
+        The actions represent credible things the developer could do next.
+        Correct prioritization among them depends on combining profile
+        preferences with the task context.
+
+        Args:
+            profile: The synthetic profile for this trial.
+            task_context: The synthetic task context for this trial.
+
+        Returns:
+            A list of 3-4 plausible action strings.
+        """
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a data generator. You MUST return a flat JSON "
+                    'object with exactly one key: "actions". '
+                    "Do NOT nest the object inside another key."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Given this developer profile and task context, generate "
+                    "3-4 plausible next actions the developer could take. Each "
+                    "action should be a credible thing they could do next. The "
+                    "correct prioritization among them should depend on "
+                    "combining the profile preferences with the task context.\n\n"
+                    f"Profile: {profile.model_dump_json()}\n"
+                    f"Task Context: {task_context.model_dump_json()}\n\n"
+                    'Return JSON: {"actions": ["action 1", "action 2", "action 3"]}'
+                ),
+            },
+        ]
+
+        response_format: Dict[str, Any] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "plausible_actions",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "actions": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        }
+                    },
+                    "required": ["actions"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            },
+        }
+
         llm_response = llm_chat_with_json_output(
             agent_name=self.agent_name,
             messages=messages,
@@ -290,8 +412,8 @@ class SyntheticDataGenerator:
 
         raw = llm_response["response"]["response_message"]
         data = json.loads(raw) if isinstance(raw, str) else raw
-        data = _unwrap_nested(data, ["query"])
-        return data["query"]
+        data = _unwrap_nested(data, ["actions"])
+        return data["actions"]
 
     # ------------------------------------------------------------------
     # Orchestrator
@@ -300,21 +422,26 @@ class SyntheticDataGenerator:
     def generate_trial_data(self, trial_index: int) -> SyntheticTrialData:
         """Generate all synthetic data for a single trial.
 
-        Orchestrates profile → task context → follow-up query generation.
+        Orchestrates profile → task context → plausible actions → follow-up
+        query generation, and derives a stable user_id from the profile.
 
         Args:
             trial_index: Zero-based trial number.
 
         Returns:
             A ``SyntheticTrialData`` bundle with profile, task context,
-            and follow-up query.
+            follow-up query, plausible actions, and user_id.
         """
         profile = self.generate_profile(trial_index)
         task_context = self.generate_task_context(trial_index, profile)
-        follow_up_query = self.generate_follow_up_query(profile, task_context)
+        plausible_actions = self.generate_plausible_actions(profile, task_context)
+        follow_up_query = self.generate_vague_query(profile, task_context)
+        user_id = profile.user_name.lower().replace(" ", "_")
 
         return SyntheticTrialData(
             profile=profile,
             task_context=task_context,
             follow_up_query=follow_up_query,
+            plausible_actions=plausible_actions,
+            user_id=user_id,
         )

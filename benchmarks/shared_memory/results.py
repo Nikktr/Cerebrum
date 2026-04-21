@@ -62,12 +62,18 @@ class ResultsWriter:
         failed_trials = sum(1 for t in trials if t.failed)
         non_failed = [t for t in trials if not t.failed]
 
-        relevance_vals = [t.relevance_score for t in non_failed if t.relevance_score is not None]
-        personalization_vals = [t.personalization_score for t in non_failed if t.personalization_score is not None]
+        relevance_vals = [t.profile_usage_score for t in non_failed if t.profile_usage_score is not None]
+        task_usage_vals = [t.task_usage_score for t in non_failed if t.task_usage_score is not None]
+        integration_vals = [t.integration_score for t in non_failed if t.integration_score is not None]
         latency_vals = [t.latency_seconds for t in non_failed if t.latency_seconds is not None]
         memory_total_vals = [float(t.memory_counts.total) for t in non_failed]
         memory_shared_vals = [float(t.memory_counts.shared) for t in non_failed]
         memory_private_vals = [float(t.memory_counts.private) for t in non_failed]
+        injected_vals = [
+            float(t.injection_diagnostics.injected_count)
+            if t.injection_diagnostics is not None else 0.0
+            for t in non_failed
+        ]
 
         def _safe_stats(vals: List[float]) -> SummaryStatistics:
             if not vals:
@@ -75,12 +81,14 @@ class ResultsWriter:
             return self._compute_metric_stats(vals)
 
         return ConditionSummary(
-            relevance=_safe_stats([float(v) for v in relevance_vals]),
-            personalization=_safe_stats([float(v) for v in personalization_vals]),
+            profile_usage=_safe_stats([float(v) for v in relevance_vals]),
+            task_usage=_safe_stats([float(v) for v in task_usage_vals]),
+            integration=_safe_stats([float(v) for v in integration_vals]),
             latency=_safe_stats(latency_vals),
             memory_total=_safe_stats(memory_total_vals),
             memory_shared=_safe_stats(memory_shared_vals),
             memory_private=_safe_stats(memory_private_vals),
+            injected_memories=_safe_stats(injected_vals),
             total_trials=total_trials,
             failed_trials=failed_trials,
         )
@@ -114,11 +122,14 @@ class ResultsWriter:
         columns = [
             "condition",
             "trial_index",
-            "relevance_score",
-            "personalization_score",
+            "profile_usage_score",
+            "task_usage_score",
+            "integration_score",
             "memory_total",
             "memory_shared",
             "memory_private",
+            "shared_memory_count",
+            "cross_agent_found",
             "latency_seconds",
             "query",
             "response",
@@ -128,14 +139,20 @@ class ResultsWriter:
             writer.writerow(columns)
             for condition_result in experiment.conditions:
                 for trial in condition_result.trials:
+                    retrieval_log = trial.retrieval_log
+                    shared_mem_count = retrieval_log.shared_memory_count if retrieval_log else 0
+                    cross_found = retrieval_log.cross_agent_found if retrieval_log else False
                     writer.writerow([
                         trial.condition,
                         trial.trial_index,
-                        trial.relevance_score,
-                        trial.personalization_score,
+                        trial.profile_usage_score,
+                        trial.task_usage_score,
+                        trial.integration_score,
                         trial.memory_counts.total,
                         trial.memory_counts.shared,
                         trial.memory_counts.private,
+                        shared_mem_count,
+                        cross_found,
                         trial.latency_seconds,
                         trial.follow_up_query,
                         trial.assistant_response,

@@ -264,7 +264,10 @@ def delete_memory(agent_name: str,
 def search_memories(agent_name: str,
                    query: str,
                    k: int = 5,
-                   base_url: str = aios_kernel_url) -> MemoryResponse:
+                   base_url: str = aios_kernel_url,
+                   *,
+                   user_id: Optional[str] = None,
+                   sharing_policy: Optional[str] = None) -> MemoryResponse:
     """Search for memories using a hybrid retrieval approach.
     
     Args:
@@ -272,6 +275,14 @@ def search_memories(agent_name: str,
         query: Search query text
         k: Maximum number of results to return
         base_url: Base URL for the API server
+        user_id: Optional user ID for cross-agent memory retrieval.
+            When provided, the kernel searches across all agents' memories
+            scoped to this user instead of restricting to ``agent_name``.
+            Must be a non-empty string or ``None`` (default).
+        sharing_policy: Optional sharing policy filter. Accepted values
+            are ``"shared"``, ``"private"``, or ``None`` (default).
+            When provided, the kernel filters results to memories whose
+            metadata contains the matching ``sharing_policy`` value.
         
     Returns:
         MemoryResponse containing search results
@@ -286,6 +297,26 @@ def search_memories(agent_name: str,
         # Memory ID: mem_123abc
         # Content: Meeting notes: Discussed Q1 goals
         # Score: 0.92
+
+    Kernel Contract:
+        The kernel interprets ``user_id`` and ``sharing_policy`` in the
+        ``params`` dict to determine the search scope:
+
+        Neither ``user_id`` nor ``sharing_policy``:
+            Default agent-scoped search. The kernel restricts results to
+            memories owned by ``agent_name`` (existing behavior).
+        ``user_id`` only:
+            Search across all agents' memories scoped to that user. The
+            kernel bypasses the agent-name scope and returns memories
+            matching the given ``user_id``.
+        ``sharing_policy`` only:
+            Search within the default agent scope, but filter results to
+            memories whose metadata ``sharing_policy`` matches the
+            provided value.
+        Both ``user_id`` and ``sharing_policy``:
+            Cross-agent search. The kernel bypasses the agent-name scope
+            and returns memories matching both the ``user_id`` AND the
+            ``sharing_policy`` metadata filter.
 
     Provider-Specific Metadata Keys:
         These keys can be used to scope search results when passed via
@@ -302,8 +333,21 @@ def search_memories(agent_name: str,
         in-house:
             No provider-specific metadata keys required.
     """
-    query = MemoryQuery(
+    if sharing_policy is not None and sharing_policy not in ("shared", "private"):
+        raise ValueError(
+            f"sharing_policy must be 'shared', 'private', or None; got {sharing_policy!r}"
+        )
+    if user_id is not None and not user_id.strip():
+        raise ValueError("user_id must be a non-empty string or None")
+
+    params: Dict[str, Any] = {"content": query, "k": k}
+    if user_id is not None:
+        params["user_id"] = user_id
+    if sharing_policy is not None:
+        params["sharing_policy"] = sharing_policy
+
+    query_obj = MemoryQuery(
         operation_type="retrieve_memory",
-        params={"content": query, "k": k}
+        params=params,
     )
-    return send_request(agent_name, query, base_url)
+    return send_request(agent_name, query_obj, base_url)

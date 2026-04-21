@@ -23,6 +23,10 @@ MEMORY_TYPE_PROFILE = "profile"
 MEMORY_TYPE_TASK_CONTEXT = "task_context"
 
 
+_VALID_SHARING_POLICIES = {POLICY_PRIVATE, POLICY_SHARED}
+_VALID_MEMORY_TYPES = {MEMORY_TYPE_PROFILE, MEMORY_TYPE_TASK_CONTEXT, MEMORY_TYPE_CONVERSATION}
+
+
 def build_memory_metadata(
     owner_agent: str,
     user_id: str,
@@ -30,18 +34,44 @@ def build_memory_metadata(
     sharing_policy: str = POLICY_PRIVATE,
     **extra: Any,
 ) -> Dict[str, Any]:
-    """Build a metadata dict conforming to the memory metadata schema.
+    """Build a validated metadata dict for kernel memory operations.
 
     Args:
-        owner_agent: The agent_name of the creating agent.
-        user_id: Identifier for the user this memory pertains to.
-        memory_type: One of MEMORY_TYPE_* constants.
-        sharing_policy: POLICY_PRIVATE (default) or POLICY_SHARED.
-        **extra: Additional provider-specific keys (e.g., mem0 user_id).
+        owner_agent: The agent_name of the creating agent. Must be non-empty.
+        user_id: Identifier for the user. Must be non-empty.
+        memory_type: One of "profile", "task_context", "conversation".
+        sharing_policy: "private" (default) or "shared".
+        **extra: Additional provider-specific keys.
 
     Returns:
-        A metadata dictionary ready to pass to create_memory / update_memory.
+        A metadata dictionary with exactly the four standard fields
+        plus any extra kwargs.
+
+    Raises:
+        ValueError: If sharing_policy, memory_type, owner_agent, or
+            user_id is invalid.
     """
+    if sharing_policy not in _VALID_SHARING_POLICIES:
+        raise ValueError(
+            f"Invalid sharing_policy: {sharing_policy!r}. "
+            f"Must be one of {sorted(_VALID_SHARING_POLICIES)}."
+        )
+    if memory_type not in _VALID_MEMORY_TYPES:
+        raise ValueError(
+            f"Invalid memory_type: {memory_type!r}. "
+            f"Must be one of {sorted(_VALID_MEMORY_TYPES)}."
+        )
+    if not isinstance(owner_agent, str) or not owner_agent:
+        raise ValueError(
+            f"Invalid owner_agent: {owner_agent!r}. "
+            "owner_agent must be a non-empty string."
+        )
+    if not isinstance(user_id, str) or not user_id:
+        raise ValueError(
+            f"Invalid user_id: {user_id!r}. "
+            "user_id must be a non-empty string."
+        )
+
     metadata: Dict[str, Any] = {
         FIELD_OWNER_AGENT: owner_agent,
         FIELD_USER_ID: user_id,

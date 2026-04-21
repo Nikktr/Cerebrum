@@ -39,6 +39,27 @@ class SyntheticTrialData(BaseModel):
     profile: SyntheticProfile
     task_context: SyntheticTaskContext
     follow_up_query: str
+    plausible_actions: List[str] = []
+    user_id: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Retrieval log models
+# ---------------------------------------------------------------------------
+
+class RetrievalLogEntry(BaseModel):
+    """Single retrieved memory entry with ownership metadata."""
+
+    owner_agent: str
+    memory_type: str
+
+
+class RetrievalLog(BaseModel):
+    """Structured record of what memories the AssistantAgent retrieved."""
+
+    shared_memory_count: int = 0
+    retrieved_memories: List[RetrievalLogEntry] = []
+    cross_agent_found: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -46,12 +67,15 @@ class SyntheticTrialData(BaseModel):
 # ---------------------------------------------------------------------------
 
 class JudgeScores(BaseModel):
-    """LLM judge output."""
+    """LLM judge output — 3-score rubric."""
 
-    relevance_score: Optional[int] = None
-    personalization_score: Optional[int] = None
-    relevance_reasoning: Optional[str] = None
-    personalization_reasoning: Optional[str] = None
+    profile_usage_score: Optional[int] = None
+    task_usage_score: Optional[int] = None
+    integration_score: Optional[int] = None
+    generic_penalty: Optional[bool] = None
+    profile_usage_reasoning: Optional[str] = None
+    task_usage_reasoning: Optional[str] = None
+    integration_reasoning: Optional[str] = None
 
 
 class MemoryCounts(BaseModel):
@@ -62,19 +86,47 @@ class MemoryCounts(BaseModel):
     private: int = 0
 
 
+class InjectedMemoryEntry(BaseModel):
+    """Single injected memory with source attribution."""
+
+    owner_agent: str
+    memory_type: str
+    match_score: Optional[float] = None
+
+
+class InjectionDiagnostics(BaseModel):
+    """Kernel injection audit for a single trial."""
+
+    injected_count: int = 0
+    injected_memories: List[InjectedMemoryEntry] = []
+
+
+class WrittenMemoryRecord(BaseModel):
+    """Record of metadata written by an agent during a trial."""
+
+    agent_name: str
+    memory_type: str
+    sharing_policy: str
+    user_id: str
+
+
 class TrialResult(BaseModel):
     """Complete result for one trial."""
 
     trial_index: int
     condition: str
-    relevance_score: Optional[int] = None
-    personalization_score: Optional[int] = None
+    profile_usage_score: Optional[int] = None
+    task_usage_score: Optional[int] = None
+    integration_score: Optional[int] = None
     memory_counts: MemoryCounts = MemoryCounts()
     latency_seconds: Optional[float] = None
     follow_up_query: str = ""
     assistant_response: str = ""
     synthetic_profile: Optional[SyntheticProfile] = None
     synthetic_task_context: Optional[SyntheticTaskContext] = None
+    retrieval_log: Optional[RetrievalLog] = None
+    injection_diagnostics: Optional[InjectionDiagnostics] = None
+    written_memories: List[WrittenMemoryRecord] = []
     failed: bool = False
     error_message: Optional[str] = None
 
@@ -95,12 +147,14 @@ class SummaryStatistics(BaseModel):
 class ConditionSummary(BaseModel):
     """Summary statistics for all metrics in one condition."""
 
-    relevance: SummaryStatistics
-    personalization: SummaryStatistics
+    profile_usage: SummaryStatistics
+    task_usage: SummaryStatistics
+    integration: SummaryStatistics
     latency: SummaryStatistics
     memory_total: SummaryStatistics
     memory_shared: SummaryStatistics
     memory_private: SummaryStatistics
+    injected_memories: SummaryStatistics
     total_trials: int
     failed_trials: int
 

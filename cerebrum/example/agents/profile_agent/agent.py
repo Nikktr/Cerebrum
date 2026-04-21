@@ -56,7 +56,7 @@ class ProfileAgent:
             self.rounds += 1
 
             # Upsert profile memory using extracted user_name as user_id
-            user_id = profile_data.get("user_name", self.agent_name)
+            user_id = getattr(self, 'user_id', profile_data.get("user_name", self.agent_name))
             memory_ids = self._upsert_profile_memory(user_id, profile_data)
 
             result_summary = (

@@ -56,7 +56,7 @@ class TaskAgent:
             self.rounds += 1
 
             # Upsert task context memory using current_project as user_id
-            user_id = context_data.get("current_project", self.agent_name)
+            user_id = getattr(self, 'user_id', context_data.get("current_project", self.agent_name))
             memory_ids = self._upsert_task_memory(user_id, context_data)
 
             result_summary = (
