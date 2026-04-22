@@ -57,9 +57,7 @@ def test_system_instruction_has_no_shared_context():
     with patch(
         "cerebrum.example.agents.assistant_agent.agent.llm_chat",
         return_value=mock_response,
-    ) as mock_llm, patch(
-        "cerebrum.example.agents.assistant_agent.agent.create_memory",
-    ):
+    ) as mock_llm:
         agent.run("What is the weather?")
 
         # Inspect the messages passed to llm_chat
@@ -99,8 +97,6 @@ def test_search_memories_not_called():
         "cerebrum.example.agents.assistant_agent.agent.llm_chat",
         return_value=mock_response,
     ), patch(
-        "cerebrum.example.agents.assistant_agent.agent.create_memory",
-    ), patch(
         "cerebrum.memory.apis.search_memories",
     ) as mock_search:
         agent.run("Tell me about Python.")
@@ -110,9 +106,9 @@ def test_search_memories_not_called():
     print("PASSED: search_memories is not called during run()")
 
 
-def test_conversation_memory_stored_with_correct_type():
-    """create_memory is called with metadata containing
-    memory_type='conversation'. (Req 4.4)"""
+def test_create_memory_not_called():
+    """AssistantAgent does not call create_memory — kernel auto_extract
+    handles conversation memory storage. (Req 4.4)"""
     agent = _create_agent()
 
     mock_response = {
@@ -122,23 +118,16 @@ def test_conversation_memory_stored_with_correct_type():
     with patch(
         "cerebrum.example.agents.assistant_agent.agent.llm_chat",
         return_value=mock_response,
-    ), patch(
-        "cerebrum.example.agents.assistant_agent.agent.create_memory",
-    ) as mock_create:
+    ):
         agent.run("Summarize my notes.")
 
-        mock_create.assert_called_once()
-        call_kwargs = mock_create.call_args
-        metadata = (
-            call_kwargs.kwargs.get("metadata")
-            or call_kwargs[1].get("metadata")
-        )
-        assert metadata is not None, "create_memory must be called with metadata"
-        assert metadata.get("memory_type") == "conversation", (
-            f"Expected memory_type='conversation', got {metadata.get('memory_type')!r}"
-        )
+    # Verify create_memory is not imported in the module
+    import cerebrum.example.agents.assistant_agent.agent as agent_module
+    assert not hasattr(agent_module, "create_memory"), (
+        "create_memory should not be imported — kernel auto_extract handles it"
+    )
 
-    print("PASSED: conversation memory stored with memory_type='conversation'")
+    print("PASSED: AssistantAgent does not use create_memory (kernel auto_extract handles it)")
 
 
 def test_filter_shared_memories_not_imported():
@@ -220,7 +209,7 @@ def test_search_memories_accepts_cross_agent_params():
 if __name__ == "__main__":
     test_system_instruction_has_no_shared_context()
     test_search_memories_not_called()
-    test_conversation_memory_stored_with_correct_type()
+    test_create_memory_not_called()
     test_filter_shared_memories_not_imported()
     test_filter_shared_memories_importable_and_callable()
     test_search_memories_accepts_cross_agent_params()

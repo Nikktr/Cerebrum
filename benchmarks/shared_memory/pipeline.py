@@ -10,11 +10,14 @@ The pipeline captures injection diagnostics from the kernel response
 by intercepting create_memory calls from the harness side.
 """
 
+import logging
 import time
 import json
 from dataclasses import dataclass, field
 from typing import List, Optional
 from unittest.mock import patch
+
+logger = logging.getLogger(__name__)
 
 from cerebrum.example.agents.profile_agent.agent import ProfileAgent
 from cerebrum.example.agents.task_agent.agent import TaskAgent
@@ -129,8 +132,18 @@ class AgentPipeline:
         # Build retrieval log: use kernel diagnostics or fall back to audit query
         if injection_diagnostics and injection_diagnostics.injected_count > 0:
             retrieval_log = self._retrieval_log_from_diagnostics(injection_diagnostics)
+            # injection_status defaults to "confirmed"
         else:
             retrieval_log = self._audit_shared_memories(trial_data.user_id)
+            if retrieval_log.shared_memory_count > 0:
+                retrieval_log.injection_status = "audit_inferred"
+            elif self.share_memory:
+                retrieval_log.injection_status = "unknown"
+                logger.warning(
+                    "Observability gap: kernel diagnostics absent and audit "
+                    "query returned 0 results for Phase 2 trial. "
+                    "Injection status unknown."
+                )
 
         return PipelineResult(
             profile_result=profile_result,

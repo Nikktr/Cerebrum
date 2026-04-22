@@ -60,6 +60,14 @@ class RetrievalLog(BaseModel):
     shared_memory_count: int = 0
     retrieved_memories: List[RetrievalLogEntry] = []
     cross_agent_found: bool = False
+    injection_status: str = "confirmed"
+    """Source of truth for injection data.
+
+    Valid values:
+    - ``"confirmed"``: from kernel diagnostics (default for backward compat)
+    - ``"audit_inferred"``: from audit query with count > 0
+    - ``"unknown"``: neither source confirmed injection
+    """
 
 
 # ---------------------------------------------------------------------------

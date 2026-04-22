@@ -2,15 +2,7 @@ import os
 import json
 
 from cerebrum.llm.apis import llm_chat
-from cerebrum.memory.apis import create_memory
 from cerebrum.config.config_manager import config
-
-from cerebrum.example.agents.shared_memory_utils import (
-    build_memory_metadata,
-    MEMORY_TYPE_CONVERSATION,
-    POLICY_PRIVATE,
-    POLICY_SHARED,
-)
 
 aios_kernel_url = config.get_kernel_url()
 
@@ -18,8 +10,9 @@ aios_kernel_url = config.get_kernel_url()
 class AssistantAgent:
     """A personalized assistant agent that helps users with queries.
 
-    Issues plain llm_chat calls. When the kernel's memory.auto_inject is
-    enabled, shared context is injected automatically by the kernel.
+    Issues plain llm_chat calls. The kernel handles all memory operations:
+    - auto_extract stores conversation turns as memories automatically
+    - auto_inject retrieves and injects relevant memories into context
     """
 
     def __init__(self, agent_name: str):
@@ -55,7 +48,7 @@ class AssistantAgent:
             # Append user query
             self.messages.append({"role": "user", "content": task_input})
 
-            # Call LLM — kernel auto_inject prepends shared context when enabled
+            # Call LLM — kernel handles memory injection and extraction
             response = llm_chat(
                 agent_name=self.agent_name,
                 messages=self.messages,
@@ -65,15 +58,6 @@ class AssistantAgent:
             result_text = response["response"]["response_message"] if response else ""
             self.messages.append({"role": "assistant", "content": result_text})
             self.rounds += 1
-
-            # Store conversation as memory
-            try:
-                self._store_conversation_memory(
-                    user_id=getattr(self, 'user_id', self.agent_name),
-                    content=f"User: {task_input}\nAssistant: {result_text}",
-                )
-            except Exception:
-                pass  # Memory storage failure is non-critical
 
             return {
                 "agent_name": self.agent_name,
@@ -87,23 +71,3 @@ class AssistantAgent:
                 "result": f"Error: {e}",
                 "rounds": self.rounds,
             }
-
-    def _store_conversation_memory(self, user_id: str, content: str) -> None:
-        """Store conversation turn as memory.
-
-        Args:
-            user_id: Identifier for the user this memory pertains to.
-            content: The conversation content to store.
-        """
-        metadata = build_memory_metadata(
-            owner_agent=self.agent_name,
-            user_id=user_id,
-            memory_type=MEMORY_TYPE_CONVERSATION,
-            sharing_policy=POLICY_SHARED if getattr(self, 'share_memory', False) else POLICY_PRIVATE,
-        )
-        create_memory(
-            agent_name=self.agent_name,
-            content=content,
-            metadata=metadata,
-            base_url=aios_kernel_url,
-        )
