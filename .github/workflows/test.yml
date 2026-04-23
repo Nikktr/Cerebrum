@@ -53,6 +53,32 @@ jobs:
     - name: Install Cerebrum
       run: |
         python -m pip install -e aios_root/Cerebrum/
+    # Create AIOS kernel config if missing
+    - name: Create AIOS kernel config
+      run: |
+        mkdir -p aios_root/aios/config
+        if [ ! -f aios_root/aios/config/config.yaml ]; then
+          cat > aios_root/aios/config/config.yaml << 'EOF'
+        llm:
+          max_gpu_memory: null
+          kernel_max_new_tokens: 512
+        memory:
+          auto_extract: true
+          auto_inject: true
+          relevance_threshold: 0.3
+          max_injected_memories: 10
+          max_memory_tokens: 2000
+        storage:
+          root_dir: root
+        server:
+          hostname: localhost
+          port: 8000
+        EOF
+          echo "Created default config.yaml"
+        else
+          echo "config.yaml already exists"
+        fi
+
     # Run AIOS kernel
     - name: Run AIOS kernel in background
       run: |
