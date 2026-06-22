@@ -1,0 +1,24 @@
+{
+    "name": "codex_agent",
+    "description": [
+        "A bridge agent that delegates tasks to OpenAI Codex CLI. ",
+        "Codex is an agentic coding tool powered by OpenAI models with ",
+        "file editing, terminal access, and code review capabilities."
+    ],
+    "tools": [],
+    "meta": {
+        "author": "aios_local",
+        "version": "0.1.0",
+        "license": "MIT"
+    },
+    "build": {
+        "entry": "agent.py",
+        "module": "CodexAgent"
+    },
+    "role": {
+        "capabilities": ["code", "review", "debug", "test"],
+        "strengths": "Good for code generation, code review, writing tests. OpenAI-powered.",
+        "priority": 2,
+        "timeout": 600
+    }
+}

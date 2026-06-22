@@ -1,0 +1,25 @@
+{
+    "name": "hermes_agent",
+    "description": [
+        "A bridge agent that delegates tasks to Hermes AI Agent (NousResearch). ",
+        "Hermes is an autonomous self-improving agent with 60+ tools, web search, ",
+        "browser automation, image generation, and persistent memory. ",
+        "Use this agent for complex autonomous tasks that benefit from Hermes capabilities."
+    ],
+    "tools": [],
+    "meta": {
+        "author": "aios_local",
+        "version": "0.1.0",
+        "license": "MIT"
+    },
+    "build": {
+        "entry": "agent.py",
+        "module": "HermesAgent"
+    },
+    "role": {
+        "capabilities": ["web", "automation", "research", "browser", "image"],
+        "strengths": "Best for web scraping, browser automation, image generation, web research. Has 60+ built-in tools.",
+        "priority": 2,
+        "timeout": 300
+    }
+}

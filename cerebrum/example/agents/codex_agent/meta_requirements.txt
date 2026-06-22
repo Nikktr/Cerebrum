@@ -1,0 +1,1 @@
+# No additional dependencies - Codex is installed via npm globally

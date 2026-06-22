@@ -1,0 +1,24 @@
+{
+    "name": "claude_code_agent",
+    "description": [
+        "A bridge agent that delegates tasks to Claude Code CLI (Anthropic). ",
+        "Claude Code is an agentic coding tool with file editing, terminal access, ",
+        "and deep codebase understanding. Use for code generation, debugging, refactoring."
+    ],
+    "tools": [],
+    "meta": {
+        "author": "aios_local",
+        "version": "0.1.0",
+        "license": "MIT"
+    },
+    "build": {
+        "entry": "agent.py",
+        "module": "ClaudeCodeAgent"
+    },
+    "role": {
+        "capabilities": ["code", "architecture", "debug", "refactor", "review", "docs"],
+        "strengths": "Best for complex code tasks, architecture decisions, large refactors, debugging. Deep codebase understanding.",
+        "priority": 1,
+        "timeout": 600
+    }
+}
