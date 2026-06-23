@@ -28,6 +28,21 @@ class HermesAgent(BridgeAgent):
                 return expanded
         return "hermes"
 
+    def _run_hermes(self, prompt, cwd=None):
+        result = subprocess.run(
+            [self.hermes_exe, "--yolo", "-z", prompt],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            encoding="utf-8",
+            errors="replace",
+            cwd=cwd,
+        )
+        output = result.stdout.strip()
+        if result.returncode != 0 and result.stderr:
+            output += "\n[stderr]: " + result.stderr.strip()
+        return output
+
     def run(self, task_input):
         project_id, project_path, task_text = self._resolve_project(task_input)
         context = self._get_shared_context(task_text, project_id)
@@ -36,23 +51,16 @@ class HermesAgent(BridgeAgent):
         cwd = project_path if project_path and os.path.isdir(project_path) else None
 
         try:
-            result = subprocess.run(
-                [self.hermes_exe, "--yolo", "-z", prompt],
-                capture_output=True,
-                text=True,
-                timeout=300,
-                encoding="utf-8",
-                errors="replace",
-                cwd=cwd,
+            output = self._run_hermes(prompt, cwd)
+
+            output, rounds = self._process_mcp_in_output(
+                output, lambda p: self._run_hermes(p, cwd)
             )
-            output = result.stdout.strip()
-            if result.returncode != 0 and result.stderr:
-                output += "\n[stderr]: " + result.stderr.strip()
 
             result_text = output if output else "(no output)"
             self._save_to_memory(task_text, result_text, project_id)
 
-            return {"agent_name": self.agent_name, "result": result_text, "rounds": 1}
+            return {"agent_name": self.agent_name, "result": result_text, "rounds": rounds}
 
         except subprocess.TimeoutExpired:
             return {"agent_name": self.agent_name, "result": "Hermes timed out after 300s.", "rounds": 1}

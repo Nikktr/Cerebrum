@@ -110,6 +110,30 @@ class BridgeAgent:
         except Exception as e:
             return f"MCP call failed: {e}"
 
+    def _get_mcp_openai_functions(self):
+        """Get MCP tools in OpenAI function-calling format from the kernel."""
+        try:
+            r = _requests.get(f"{KERNEL_URL}/mcp/list", timeout=10)
+            data = r.json()
+            if data.get("status") != "success":
+                return []
+            functions = []
+            for srv_name, tools in data.get("servers", {}).items():
+                for t in tools:
+                    if not isinstance(t, dict) or "error" in t:
+                        continue
+                    name = t.get("name", "")
+                    if not name:
+                        continue
+                    functions.append({
+                        "server": srv_name,
+                        "tool": name,
+                        "description": (t.get("description") or "")[:120],
+                    })
+            return functions
+        except Exception:
+            return []
+
     def _format_mcp_tools_for_prompt(self, mcp_tools):
         """Format MCP tools into a text block for the agent prompt."""
         if not mcp_tools:
@@ -123,7 +147,95 @@ class BridgeAgent:
                 name = t.get("name", "?")
                 desc = t.get("description", "")
                 lines.append(f"    - {name}: {desc[:80]}")
+        lines.append("")
+        lines.append("IMPORTANT: To call any MCP tool, you MUST output ONLY a JSON block in this exact format:")
+        lines.append('```json')
+        lines.append('{"mcp_call": {"server": "<server>", "tool": "<tool>", "arguments": {...}}}')
+        lines.append('```')
+        lines.append("The system will execute it and return the result to you.")
+        lines.append("Do NOT describe what you would do — actually output the mcp_call JSON to execute the tool.")
+        lines.append("Example — to create a Linear issue:")
+        lines.append('```json')
+        lines.append('{"mcp_call": {"server": "linear", "tool": "save_issue", "arguments": {"title": "My task", "team": "TeamName"}}}')
+        lines.append('```')
         return "\n".join(lines) if len(lines) > 1 else ""
+
+    def _extract_mcp_calls(self, text):
+        """Extract MCP tool call requests from agent output."""
+        import re
+        calls = []
+        for m in re.finditer(r'"mcp_call"', text):
+            start = text.rfind("{", 0, m.start())
+            if start < 0:
+                continue
+            depth = 0
+            for i in range(start, len(text)):
+                if text[i] == "{":
+                    depth += 1
+                elif text[i] == "}":
+                    depth -= 1
+                if depth == 0:
+                    try:
+                        parsed = json.loads(text[start:i + 1])
+                        call = parsed.get("mcp_call", {})
+                        if call.get("server") and call.get("tool"):
+                            calls.append(call)
+                    except json.JSONDecodeError:
+                        pass
+                    break
+        return calls
+
+    def _execute_mcp_calls(self, calls):
+        """Execute extracted MCP calls and return results."""
+        results = []
+        for call in calls:
+            result = self._call_mcp_tool(
+                call["server"], call["tool"], call.get("arguments")
+            )
+            results.append({
+                "server": call["server"],
+                "tool": call["tool"],
+                "result": result
+            })
+        return results
+
+    def _process_mcp_in_output(self, output, run_fn, max_rounds=5):
+        """Parse agent output for MCP calls, execute them, re-run agent with results.
+
+        Args:
+            output: Agent's text output.
+            run_fn: Callable(prompt) -> str that re-invokes the agent CLI.
+            max_rounds: Maximum MCP execution rounds.
+
+        Returns:
+            (final_output, total_rounds)
+        """
+        total_rounds = 1
+        for _ in range(max_rounds):
+            calls = self._extract_mcp_calls(output)
+            if not calls:
+                break
+            results = self._execute_mcp_calls(calls)
+            results_text = "\n".join(
+                f"[MCP result] {r['server']}/{r['tool']}: {r['result'][:2000]}"
+                for r in results
+            )
+            followup = (
+                f"MCP tool results:\n\n"
+                f"{results_text}\n\n"
+                f"Use these results to continue the original task. "
+                f"If you need to call another MCP tool, output the mcp_call JSON block. "
+                f"If the task is complete, provide the final answer.\n\n"
+                f"Reminder — MCP call format:\n"
+                f'{{"mcp_call": {{"server": "<server>", "tool": "<tool>", "arguments": {{...}}}}}}'
+            )
+            try:
+                output = run_fn(followup)
+                total_rounds += 1
+            except Exception as e:
+                output += f"\n[MCP followup error]: {e}"
+                break
+        return output, total_rounds
 
     def _build_prompt_with_context(self, task_text, context, mcp_tools=None, project_path=""):
         parts = [task_text]
